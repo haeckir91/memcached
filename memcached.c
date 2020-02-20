@@ -82,6 +82,7 @@
 static void drive_machine(conn *c);
 static int new_socket(struct addrinfo *ai);
 static ssize_t tcp_read(conn *arg, void *buf, size_t count);
+static ssize_t tcp_read_msg(conn *arg, void *buf, size_t count);
 static ssize_t tcp_sendmsg(conn *arg, struct msghdr *msg, int flags);
 static ssize_t tcp_write(conn *arg, void *buf, size_t count);
 
@@ -158,6 +159,142 @@ static conn *listen_conn = NULL;
 static int max_fds;
 static struct event_base *main_base;
 
+struct time_bench {
+    uint64_t start;
+    uint64_t end;
+};
+
+static bool run_bench = false;
+static int num_requests = 0;
+static char* if_name = "enp69s0";
+static bool hw_ts = false;
+static bool rx_only = true;
+static struct time_bench ts_pairs[10001];
+static int num_done = -1;
+#ifdef __linux
+
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <linux/net_tstamp.h>
+#define NSEC_PER_SEC    1000000000L
+
+#endif
+
+#ifndef SIOCSHWTSTAMP
+#define SIOCSHWTSTAMP 0x89b0
+#endif
+
+
+/* Given a packet, extract the timestamp(s) */
+static uint64_t get_socket_ts(struct msghdr* msg)
+{
+    struct timespec* ts = NULL;
+    struct cmsghdr* cmsg;
+
+    for( cmsg = CMSG_FIRSTHDR(msg); cmsg; cmsg = CMSG_NXTHDR(msg,cmsg) ) {
+        if( cmsg->cmsg_level != SOL_SOCKET )
+            continue;
+
+        switch( cmsg->cmsg_type ) {
+        case SO_TIMESTAMPNS:
+            ts = (struct timespec*) CMSG_DATA(cmsg);
+            break;
+        case SO_TIMESTAMPING:
+            ts = (struct timespec*) CMSG_DATA(cmsg);
+            break;
+        default:
+            /* Ignore other cmsg options */
+            break;
+        }
+    }
+
+    return ts->tv_sec*NSEC_PER_SEC + ts->tv_nsec;
+}
+
+static uint64_t recv_done() 
+{
+    struct timespec res;
+    clock_gettime(CLOCK_REALTIME, &res);
+    return res.tv_sec*NSEC_PER_SEC + res.tv_nsec;
+}
+
+/**
+ * \brief Enables HW Timestamping mechanism on the NIC and for the socket
+ **/
+static int enable_hwtstamp(int sock, char *interface, bool hw, bool rxonly)
+{
+#if __linux
+    struct ifreq hwtstamp;
+    struct hwtstamp_config hwconfig, hwconfig_requested;
+
+    memset(&hwtstamp, 0, sizeof(hwtstamp));
+    strncpy(hwtstamp.ifr_name, interface, sizeof(hwtstamp.ifr_name));
+    hwtstamp.ifr_data = (void *)&hwconfig;
+
+    memset(&hwconfig, 0, sizeof(hwconfig));
+    hwconfig.tx_type = HWTSTAMP_TX_ON;
+    hwconfig.rx_filter = HWTSTAMP_FILTER_ALL;
+
+    hwconfig_requested = hwconfig;
+
+    int so_timestamping_flags = 0;
+    if (hw)
+    {
+        if (ioctl(sock, SIOCSHWTSTAMP, &hwtstamp) < 0)
+        {
+            fprintf(stderr, "HW Timestamping failed to enable\n");
+            return -1;
+        }
+        else
+        {
+            so_timestamping_flags |= SOF_TIMESTAMPING_RAW_HARDWARE;
+            if (!rxonly)
+                so_timestamping_flags |= SOF_TIMESTAMPING_TX_HARDWARE;
+            so_timestamping_flags |= SOF_TIMESTAMPING_RX_HARDWARE;
+        }
+    }
+    else
+    {
+        so_timestamping_flags |= SOF_TIMESTAMPING_SOFTWARE;
+        if (!rxonly)
+            so_timestamping_flags |= SOF_TIMESTAMPING_TX_SOFTWARE;
+        so_timestamping_flags |= SOF_TIMESTAMPING_RX_SOFTWARE;
+    }
+
+    if (hwconfig_requested.tx_type != hwconfig.tx_type ||
+        hwconfig_requested.rx_filter != hwconfig.rx_filter)
+    {
+        fprintf(stderr,
+                "SIOCSHWTSTAMP: tx_type %d requested, got %d; rx_filter %d "
+                "requested, got %d\n",
+                hwconfig_requested.tx_type, hwconfig.tx_type,
+                hwconfig_requested.rx_filter, hwconfig.rx_filter);
+    }
+
+    if (setsockopt(sock, SOL_SOCKET, SO_TIMESTAMPING, &so_timestamping_flags,
+                   sizeof(so_timestamping_flags)) < 0)
+    {
+        return -2;
+    }
+
+    /* request IP_PKTINFO for debugging purposes
+    int enabled = 1;
+    if (setsockopt(sock, SOL_IP, IP_PKTINFO, &enabled, sizeof(enabled)) < 0)
+    {
+        return -3;
+    }*/
+#else
+    printf("Platform not supported, no timestamping!\n");
+#endif
+    return 0;
+}
+
+
+
 enum transmit_result {
     TRANSMIT_COMPLETE,   /** All done writing. */
     TRANSMIT_INCOMPLETE, /** More data remaining to write. */
@@ -169,6 +306,24 @@ enum transmit_result {
 ssize_t tcp_read(conn *c, void *buf, size_t count) {
     assert (c != NULL);
     return read(c->sfd, buf, count);
+}
+
+ssize_t tcp_read_msg(conn *c, void* buf, size_t count)
+{
+    c->hdr.msg_name = NULL; //In TCP, can be set to NULL
+    struct iovec io;//Initialize the return data
+    io.iov_base = buf; //Only one buffer
+    io.iov_len = c->rsize - c->rbytes; //The definition of return data length
+    c->hdr.msg_iov = &io;
+    c->hdr.msg_iovlen = 1;//Only a buffer, so the length of 1
+    c->hdr.msg_control = c->ctrl;
+    c->hdr.msg_controllen = 64;
+
+    ssize_t n = recvmsg(c->sfd, &c->hdr, 0);
+    if (run_bench) {
+        ts_pairs[num_done].start = get_socket_ts(&c->hdr);
+    }
+    return n;
 }
 
 ssize_t tcp_sendmsg(conn *c, struct msghdr *msg, int flags) {
@@ -711,7 +866,10 @@ conn *conn_new(const int sfd, enum conn_states init_state,
     assert(ssl == NULL);
 #endif
     {
+
         c->read = tcp_read;
+        // overwrite 
+        c->read = tcp_read_msg;
         c->sendmsg = tcp_sendmsg;
         c->write = tcp_write;
     }
@@ -5224,6 +5382,15 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
     }
     ITEM_set_cas(it, req_cas_id);
 
+    if (strncmp(key, "start_benchmark", strlen("start_benchmark")) == 0) {
+        printf("Benchmark start! \n");
+        num_requests = 2000;
+        
+        printf("NUM REQUESTS %d \n", num_requests);
+        run_bench = true;
+    }
+
+
     c->item = it;
 #ifdef NEED_ALIGN
     if (it->it_flags & ITEM_CHUNKED) {
@@ -5237,6 +5404,20 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
     c->rlbytes = it->nbytes;
     c->cmd = comm;
     conn_set_state(c, conn_nread);
+
+
+    if (strncmp(key, "end_benchmark", strlen("end_benchmark")) == 0) {
+
+        printf("Num Requests %d \n", num_requests);
+        for (int i = 0; i < num_requests; i++) {
+            uint64_t latency = ts_pairs[i].end - ts_pairs[i].start;
+            fprintf(stderr, "ID %d Start %lu End %lu Latency %lu \n",
+                   i, ts_pairs[i].start, ts_pairs[i].end, latency);
+        }
+
+        printf("Benchmark done! \n");
+        exit(EXIT_SUCCESS);
+    }
 }
 
 static void process_touch_command(conn *c, token_t *tokens, const size_t ntokens) {
@@ -5790,6 +5971,7 @@ static void process_command(conn *c, char *command) {
         ((strcmp(tokens[COMMAND_TOKEN].value, "get") == 0) ||
          (strcmp(tokens[COMMAND_TOKEN].value, "bget") == 0))) {
 
+        //printf("Get Command! \n");
         process_get_command(c, tokens, ntokens, false, false);
 
     } else if ((ntokens == 6 || ntokens == 7) &&
@@ -5799,8 +5981,8 @@ static void process_command(conn *c, char *command) {
                 (strcmp(tokens[COMMAND_TOKEN].value, "prepend") == 0 && (comm = NREAD_PREPEND)) ||
                 (strcmp(tokens[COMMAND_TOKEN].value, "append") == 0 && (comm = NREAD_APPEND)) )) {
 
+        //printf("Set Command! \n");
         process_update_command(c, tokens, ntokens, comm, false);
-
     } else if ((ntokens == 7 || ntokens == 8) && (strcmp(tokens[COMMAND_TOKEN].value, "cas") == 0 && (comm = NREAD_CAS))) {
 
         process_update_command(c, tokens, ntokens, comm, true);
@@ -6780,6 +6962,12 @@ static void drive_machine(conn *c) {
                 ssl_v = (void*) ssl;
 #endif
 
+                if (enable_hwtstamp(sfd, if_name, hw_ts, rx_only) != 0) {
+                    fprintf(stderr, "failed to enable hardware timestamps\n");
+                } else {
+                    printf("Enabled HW timestamps for socket fd %d \n", sfd);
+                }
+
                 dispatch_conn_new(sfd, conn_new_cmd, EV_READ | EV_PERSIST,
                                      DATA_BUFFER_SIZE, c->transport, ssl_v);
             }
@@ -7052,6 +7240,15 @@ static void drive_machine(conn *c) {
                         fprintf(stderr, "Unexpected state %d\n", c->state);
                     conn_set_state(c, conn_closing);
                 }
+
+                if (num_done >= 0) {
+                    ts_pairs[num_done].end = recv_done();
+                }
+
+                if (run_bench) {
+                    num_done++;
+                }
+
                 break;
 
             case TRANSMIT_INCOMPLETE:
