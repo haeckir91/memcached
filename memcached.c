@@ -5407,13 +5407,20 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
 
 
     if (strncmp(key, "end_benchmark", strlen("end_benchmark")) == 0) {
-
+        FILE* output;
+        output = fopen("memcached-kernel-tcp.csv", "w+");
+        assert(output);
+        fprintf(output, "id,rx_app,rx_nic,tx_app,tx_nic,rx_ht,completed \n");
         printf("Num Requests %d \n", num_requests);
         for (int i = 0; i < num_requests; i++) {
             uint64_t latency = ts_pairs[i].end - ts_pairs[i].start;
             fprintf(stderr, "ID %d Start %lu End %lu Latency %lu \n",
                    i, ts_pairs[i].start, ts_pairs[i].end, latency);
+            fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].end,
+                    ts_pairs[i].start);
         }
+        fflush(output);
+        fclose(output);
 
         printf("Benchmark done! \n");
         exit(EXIT_SUCCESS);
