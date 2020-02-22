@@ -195,10 +195,7 @@ static uint64_t get_socket_ts(struct msghdr* msg)
     struct timespec* ts = NULL;
     struct cmsghdr* cmsg;
 
-    for( cmsg = CMSG_FIRSTHDR(msg); cmsg; cmsg = CMSG_NXTHDR(msg,cmsg) ) {
-        if( cmsg->cmsg_level != SOL_SOCKET )
-            continue;
-
+    for( cmsg = CMSG_FIRSTHDR(msg); cmsg != NULL; cmsg = CMSG_NXTHDR(msg,cmsg) ) {
         switch( cmsg->cmsg_type ) {
         case SO_TIMESTAMPNS:
             ts = (struct timespec*) CMSG_DATA(cmsg);
@@ -212,7 +209,11 @@ static uint64_t get_socket_ts(struct msghdr* msg)
         }
     }
 
-    return ts->tv_sec*NSEC_PER_SEC + ts->tv_nsec;
+    if (ts == NULL) {
+        return 0;
+    } else {
+        return ts->tv_sec*NSEC_PER_SEC + ts->tv_nsec;
+    }
 }
 
 static uint64_t recv_done() 
@@ -317,11 +318,23 @@ ssize_t tcp_read_msg(conn *c, void* buf, size_t count)
     c->hdr.msg_iov = &io;
     c->hdr.msg_iovlen = 1;//Only a buffer, so the length of 1
     c->hdr.msg_control = c->ctrl;
-    c->hdr.msg_controllen = 64;
+    c->hdr.msg_controllen = 256;
 
     ssize_t n = recvmsg(c->sfd, &c->hdr, 0);
+
     if (run_bench) {
-        ts_pairs[num_done].start = get_socket_ts(&c->hdr);
+        if (num_done >= 0 && num_done < 10000) {
+            uint64_t ts = get_socket_ts(&c->hdr);
+            if (ts == 0) {
+                ts_pairs[num_done].start = c->last_ts;
+            } else {
+                c->last_ts = ts;
+                ts_pairs[num_done].start = ts;
+            }
+        } else {
+            fprintf(stderr, "Too many requests for benchmark \n");
+        }
+
     }
     return n;
 }
@@ -5384,10 +5397,8 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
 
     if (strncmp(key, "start_benchmark", strlen("start_benchmark")) == 0) {
         printf("Benchmark start! \n");
-        num_requests = 2000;
-        
-        printf("NUM REQUESTS %d \n", num_requests);
         run_bench = true;
+        num_requests = 0;
     }
 
 
@@ -5413,9 +5424,9 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
         fprintf(output, "id,rx_app,rx_nic,tx_app,tx_nic,rx_ht,completed \n");
         printf("Num Requests %d \n", num_requests);
         for (int i = 0; i < num_requests; i++) {
-            uint64_t latency = ts_pairs[i].end - ts_pairs[i].start;
-            fprintf(stderr, "ID %d Start %lu End %lu Latency %lu \n",
-                   i, ts_pairs[i].start, ts_pairs[i].end, latency);
+            //uint64_t latency = ts_pairs[i].end - ts_pairs[i].start;
+            //fprintf(stderr, "ID %d Start %lu End %lu Latency %lu \n",
+            //       i, ts_pairs[i].start, ts_pairs[i].end, latency);
             fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].end,
                     ts_pairs[i].start);
         }
@@ -6518,15 +6529,16 @@ static int try_read_command_ascii(conn *c) {
 
         return 0;
     }
+
     cont = el + 1;
     if ((el - c->rcurr) > 1 && *(el - 1) == '\r') {
         el--;
     }
     *el = '\0';
-
     assert(cont <= (c->rcurr + c->rbytes));
 
     c->last_cmd_time = current_time;
+
     process_command(c, c->rcurr);
 
     c->rbytes -= (cont - c->rcurr);
@@ -7249,6 +7261,7 @@ static void drive_machine(conn *c) {
                 }
 
                 if (num_done >= 0) {
+                    num_requests++;
                     ts_pairs[num_done].end = recv_done();
                 }
 

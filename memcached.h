@@ -717,7 +717,8 @@ struct conn {
 
     /*Recvmsg stuff */
     struct msghdr hdr;
-    char ctrl[64];
+    char ctrl[256];
+    uint64_t last_ts;
     /* Binary protocol stuff */
     /* This is where the binary header goes */
     protocol_binary_request_header binary_header;
