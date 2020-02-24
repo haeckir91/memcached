@@ -732,6 +732,7 @@ struct conn {
     ssize_t (*read)(conn  *c, void *buf, size_t count);
     ssize_t (*sendmsg)(conn *c, struct msghdr *msg, int flags);
     ssize_t (*write)(conn *c, void *buf, size_t count);
+    uint64_t (*read_ts)(conn *c);
 };
 
 /* array of conn structures, indexed by file descriptor */

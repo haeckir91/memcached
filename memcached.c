@@ -188,6 +188,14 @@ static int num_done = -1;
 #define SIOCSHWTSTAMP 0x89b0
 #endif
 
+static uint64_t recv_done(conn* c);
+static uint64_t recv_done(conn* c)
+{
+    struct timespec res;
+    clock_gettime(CLOCK_REALTIME, &res);
+    return res.tv_sec*NSEC_PER_SEC + res.tv_nsec;
+}
+
 
 /* Given a packet, extract the timestamp(s) */
 static uint64_t get_socket_ts(struct msghdr* msg)
@@ -220,13 +228,6 @@ static uint64_t get_socket_ts(struct msghdr* msg)
     } else {
         return ts->tv_sec*NSEC_PER_SEC + ts->tv_nsec;
     }
-}
-
-static uint64_t recv_done() 
-{
-    struct timespec res;
-    clock_gettime(CLOCK_REALTIME, &res);
-    return res.tv_sec*NSEC_PER_SEC + res.tv_nsec;
 }
 
 /**
@@ -891,6 +892,7 @@ conn *conn_new(const int sfd, enum conn_states init_state,
         c->read = tcp_read_msg;
         c->sendmsg = tcp_sendmsg;
         c->write = tcp_write;
+        c->read_ts = recv_done;
     }
 
     if (IS_UDP(transport)) {
@@ -7268,7 +7270,7 @@ static void drive_machine(conn *c) {
 
                 if (num_done >= 0) {
                     num_requests++;
-                    ts_pairs[num_done].end = recv_done();
+                    ts_pairs[num_done].end = c->read_ts(c);
                 }
 
                 if (run_bench) {
