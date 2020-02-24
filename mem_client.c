@@ -2,10 +2,34 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <getopt.h>
 
 char keys[10][50];
 
-static int num_sets = 2000;
+static int num_ops = 2000;
+static char* server = "127.0.0.1";
+
+static void parse_cmdline(int argc, char **argv)
+{
+    int opt;
+    while ((opt = getopt(argc, argv, "s:r:")) != -1) {
+        switch (opt) {
+        case 's': 
+            printf("Using server %s \n", optarg);
+            server = calloc(1, strlen(optarg));
+            strncpy(server, optarg, strlen(optarg));
+            break;
+        case 'r': 
+            printf("Sending %d set requests \n", atoi(optarg));
+            num_ops = atoi(optarg);
+            break;
+        default:
+            fprintf(stderr, "Usage: %s [-s] <Server IP Address> [-r] <Number of Requests> \n", argv[0]);
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
 
 static void rand_str(char *dest, size_t length) {
     char charset[] = "abcdefghijklmnopqrstuvwxyz"
@@ -19,8 +43,11 @@ static void rand_str(char *dest, size_t length) {
 }
 
 
+
 int main(int argc, char **argv) {
   //memcached_servers_parse (char *server_strings);
+  //
+    parse_cmdline(argc, argv);
     memcached_server_st *servers = NULL;
     memcached_st *memc;
     memcached_return rc;
@@ -42,13 +69,12 @@ int main(int argc, char **argv) {
 
     srand(time(NULL));
     for (int i = 0; i < 10; i++) {
-        rand_str(keys[i], 50);
+        rand_str(keys[i], 10);
     }
     
     
     char len_str[32];
-    sprintf(len_str, "%d", num_sets);
-    printf("%s %zu \n", len_str, strlen("2000"));
+    sprintf(len_str, "%d", num_ops);
     rc = memcached_set(memc, "start_benchmark", strlen("start_benchmark"), "2000", 
                        strlen("2000"), (time_t)0, (uint32_t)0);
     if (rc == MEMCACHED_SUCCESS) {
@@ -58,12 +84,11 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
-    for (int i = 0 ; i < num_sets; i++) {
-        //key = keys[i % 10];
+    for (int i = 0 ; i < num_ops; i++) {
+        key = keys[i % 10];
         rc = memcached_set(memc, key, strlen(key), value, strlen(value), (time_t)0, (uint32_t)0);
 
-        if (rc == MEMCACHED_SUCCESS) {
-        } else {
+        if (rc != MEMCACHED_SUCCESS) {
             fprintf(stderr, "Couldn't store key: %s\n", memcached_strerror(memc, rc));
         }
 
@@ -84,5 +109,6 @@ int main(int argc, char **argv) {
     rc = memcached_set(memc, "end_benchmark", strlen("end_benchmark"), "1000", 
                        strlen("1000"), (time_t)0, (uint32_t)0);
     
+    printf("Ending Benchmark \n");
     return 0;
 }
