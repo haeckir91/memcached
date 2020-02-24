@@ -8737,6 +8737,7 @@ int main (int argc, char **argv) {
           "v"   /* verbose */
           "d"   /* daemon mode */
           "l:"  /* interface to listen on */
+          "N:"  /* interface name to listen on */
           "u:"  /* user identity to run as */
           "P:"  /* save PID in file */
           "f:"  /* factor? */
@@ -8773,6 +8774,7 @@ int main (int argc, char **argv) {
         {"lock-memory", no_argument, 0, 'k'},
         {"help", no_argument, 0, 'h'},
         {"license", no_argument, 0, 'i'},
+        {"interface", required_argument, 0, 'N'},
         {"version", no_argument, 0, 'V'},
         {"enable-coredumps", no_argument, 0, 'r'},
         {"verbose", optional_argument, 0, 'v'},
@@ -8852,6 +8854,10 @@ int main (int argc, char **argv) {
         case 'i':
             usage_license();
             exit(EXIT_SUCCESS);
+        case 'N':
+            if_name = malloc(strlen(optarg));
+            strncpy(if_name, optarg, strlen(optarg));
+            break;
         case 'V':
             printf(PACKAGE " " VERSION "\n");
             exit(EXIT_SUCCESS);
