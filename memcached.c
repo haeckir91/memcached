@@ -196,12 +196,18 @@ static uint64_t get_socket_ts(struct msghdr* msg)
     struct cmsghdr* cmsg;
 
     for( cmsg = CMSG_FIRSTHDR(msg); cmsg != NULL; cmsg = CMSG_NXTHDR(msg,cmsg) ) {
+        if( cmsg->cmsg_level != SOL_SOCKET )
+            continue;
+
         switch( cmsg->cmsg_type ) {
         case SO_TIMESTAMPNS:
             ts = (struct timespec*) CMSG_DATA(cmsg);
             break;
         case SO_TIMESTAMPING:
-            ts = (struct timespec*) CMSG_DATA(cmsg);
+            ts = ((struct timespec*) CMSG_DATA(cmsg));
+            if ((ts != NULL) && hw_ts) {
+                ts +=2;
+            }
             break;
         default:
             /* Ignore other cmsg options */
@@ -6984,7 +6990,7 @@ static void drive_machine(conn *c) {
                 if (enable_hwtstamp(sfd, if_name, hw_ts, rx_only) != 0) {
                     fprintf(stderr, "failed to enable hardware timestamps\n");
                 } else {
-                    printf("Enabled HW timestamps for socket fd %d \n", sfd);
+                    printf("Enabled HW timestamps for socket fd %d (%s)\n", sfd, if_name);
                 }
 
                 dispatch_conn_new(sfd, conn_new_cmd, EV_READ | EV_PERSIST,
