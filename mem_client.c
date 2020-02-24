@@ -58,6 +58,8 @@ int main(int argc, char **argv) {
     size_t value_length;
     uint32_t flags;
 
+    FILE *fp = fopen("memcached-client-kernel-tcp.csv", "ab+");
+
     memc = memcached_create(NULL);
     servers = memcached_server_list_append(servers, server, 11211, &rc);
     rc = memcached_server_push(memc, servers);
