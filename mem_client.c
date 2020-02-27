@@ -16,6 +16,8 @@ static int num_ops = 2000;
 static int num_threads = 1;
 static bool non_block = false;
 static char* server = "127.0.0.1";
+static int count = 0;
+
 
 static pthread_t* threads; // all threads
 static pthread_barrier_t barrier;
@@ -115,20 +117,23 @@ static void *client(void *arg)
     
     char* key;
     char* value = "key_value";
-    printf("Num Requets %d \n", num_ops/num_threads);
-    for (int i = 0 ; i < (num_ops/num_threads); i++) {
-        key = keys[i % NUM_KEYS];
+    int req = 0;
+    while (count < num_ops) {
+        __atomic_fetch_add(&count, 1, __ATOMIC_SEQ_CST);
+        key = keys[count % NUM_KEYS];
         rc = memcached_set(memc, key, strlen(key), value, strlen(value), (time_t)0, (uint32_t)0);
 
         if (rc != MEMCACHED_SUCCESS) {
             fprintf(stderr, "Couldn't store key: %s\n", memcached_strerror(memc, rc));
         }
+        req++;
     }
 
     sleep(2);
     pthread_barrier_wait(&barrier);
 
-    printf("Thread %lu finished benchmark \n", t_id);
+    printf("Thread %lu finished benchmark after sending %d requests\n", 
+           t_id, req);
 
     if (t_id == 0) {
         rc = memcached_set(memc, "end_benchmark", strlen("end_benchmark"), "1000", 
