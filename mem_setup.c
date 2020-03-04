@@ -23,7 +23,7 @@ static pthread_t* threads; // all threads
 static void parse_cmdline(int argc, char **argv)
 {
     int opt;
-    while ((opt = getopt(argc, argv, "s:r:t:bk:")) != -1) {
+    while ((opt = getopt(argc, argv, "s:t:k:")) != -1) {
         switch (opt) {
         case 's': 
             printf("Using server %s \n", optarg);
@@ -33,10 +33,6 @@ static void parse_cmdline(int argc, char **argv)
         case 't': 
             printf("Starting %d client threads \n", atoi(optarg));
             num_threads = atoi(optarg);
-            break;
-        case 'b': 
-            printf("Sets are non blocking \n");
-            non_block = true;
             break;
         case 'k': 
             num_keys = atoi(optarg);
@@ -79,7 +75,7 @@ static void *client(void *arg)
     servers = memcached_server_list_append(servers, server, 11211, &rc);
     rc = memcached_server_push(memc, servers);
     if (rc == MEMCACHED_SUCCESS) {
-        fprintf(stderr, "Added server successfully\n");
+
     } else {
         fprintf(stderr, "Couldn't add server: %s\n", memcached_strerror(memc, rc));
     }
