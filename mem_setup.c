@@ -90,7 +90,8 @@ static void *client(void *arg)
         rand_str(keys[i], KEY_LENGTH);
         rc = memcached_set(memc, keys[i], KEY_LENGTH, value, 
                            strlen(value), (time_t)0, (uint32_t)0);
-        if (rc == MEMCACHED_SUCCESS) {
+        if (rc != MEMCACHED_SUCCESS) {
+            fprintf(stderr, "Couldn't add key\n");
         }
     }
 }
