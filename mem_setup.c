@@ -85,9 +85,9 @@ static void *client(void *arg)
     for (int i = start; i < end; i++) {
         sprintf(key, "%d", i);
         rc = memcached_set(memc, key, strlen(key), value, 
-                           strlen(value), (time_t)(60*60*24*30), (uint32_t)0);
+                           strlen(value), (time_t) 0, (uint32_t)0);
         if (rc != MEMCACHED_SUCCESS) {
-            fprintf(stderr, "Couldn't add key\n");
+            fprintf(stderr, "Couldn't add key %s \n", memcached_last_error_message(memc));
         }
     }
 }
