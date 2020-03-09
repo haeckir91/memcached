@@ -448,7 +448,8 @@ static void settings_init(void) {
 #endif
     /* By default this string should be NULL for getaddrinfo() */
     settings.inter = NULL;
-    settings.maxbytes = 64 * 1024 * 1024; /* default is 64MB */
+    //settings.maxbytes = 64 * 1024 * 1024; /* default is 64MB */
+    settings.maxbytes = (1LLU << 35); /* 32 GB */
     settings.maxconns = 1024;         /* to limit connections-related memory to about 5MB */
     settings.verbose = 0;
     settings.oldest_live = 0;
