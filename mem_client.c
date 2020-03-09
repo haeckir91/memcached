@@ -16,6 +16,7 @@ static int num_ops = 2000;
 static int num_threads = 1;
 static bool non_block = false;
 static char* server = "127.0.0.1";
+static int key_range = 15000000;
 static int count = 0;
 
 
@@ -25,7 +26,7 @@ static pthread_barrier_t barrier;
 static void parse_cmdline(int argc, char **argv)
 {
     int opt;
-    while ((opt = getopt(argc, argv, "s:r:t:b")) != -1) {
+    while ((opt = getopt(argc, argv, "s:r:t:k:b")) != -1) {
         switch (opt) {
         case 's': 
             printf("Using server %s \n", optarg);
@@ -44,6 +45,11 @@ static void parse_cmdline(int argc, char **argv)
             printf("Sets are non blocking \n");
             non_block = true;
             break;
+        case 'k': 
+            printf("Sets key range to %d \n", atoi(optarg));
+            key_range = atoi(optarg);
+            non_block = true;
+            break;
 
         default:
             fprintf(stderr, "Usage: %s [-s] <Server IP Address> [-r] <Number of Requests> \n", argv[0]);
@@ -51,19 +57,6 @@ static void parse_cmdline(int argc, char **argv)
         }
     }
 }
-
-
-static void rand_str(char *dest, size_t length) {
-    char charset[] = "abcdefghijklmnopqrstuvwxyz"
-                     "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-    while (length-- > 0) {
-        size_t index = (double) rand() / RAND_MAX * (sizeof charset - 1);
-        *dest++ = charset[index];
-    }
-    *dest = '\0';
-}
-
 
 static void *client(void *arg)
 {
@@ -82,12 +75,7 @@ static void *client(void *arg)
         fprintf(stderr, "Couldn't add server: %s\n", memcached_strerror(memc, rc));
     }
 
-    char keys[NUM_KEYS][KEY_LENGTH];
-
     srand(time(NULL));
-    for (int i = 0; i < NUM_KEYS; i++) {
-        rand_str(keys[i], KEY_LENGTH);
-    }
     
     if (non_block) {
         rc = memcached_behavior_set(memc, MEMCACHED_BEHAVIOR_NO_BLOCK, 1);
@@ -115,16 +103,17 @@ static void *client(void *arg)
     printf("Thread %lu waiting to start benchmark \n", t_id);
     pthread_barrier_wait(&barrier);
     
-    char* key;
-    char* value = "key_value";
+    char* value;
+    char key[128];
     int req = 0;
+    size_t value_length;
+    uint32_t flags;
     while (count < num_ops) {
-        __atomic_fetch_add(&count, 1, __ATOMIC_SEQ_CST);
-        key = keys[count % NUM_KEYS];
-        rc = memcached_set(memc, key, strlen(key), value, strlen(value), (time_t)0, (uint32_t)0);
-
+        int old =__atomic_fetch_add(&count, 1, __ATOMIC_SEQ_CST);
+        sprintf(key, "%d", rand() % key_range);
+        value = memcached_get(memc, key, strlen(key), &value_length, &flags, &rc);
         if (rc != MEMCACHED_SUCCESS) {
-            fprintf(stderr, "Couldn't store key: %s\n", memcached_strerror(memc, rc));
+            fprintf(stderr, "Couldn't get key: %s\n", memcached_strerror(memc, rc));
         }
         req++;
     }

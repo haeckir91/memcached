@@ -16,7 +16,6 @@ static uint64_t num_keys = 1500000;
 static int num_threads = 1;
 static bool non_block = false;
 static char* server = "127.0.0.1";
-static char** keys;
 
 static pthread_t* threads; // all threads
 
@@ -37,10 +36,6 @@ static void parse_cmdline(int argc, char **argv)
         case 'k': 
             num_keys = atoi(optarg);
             printf("Sets number of keys before benchmark to %lu \n", num_keys);
-            keys = (char**) malloc(num_keys*sizeof(char*));
-            for (int i = 0; i < num_keys; i++) {
-                keys[i] = (char*) malloc(KEY_LENGTH+1);
-            }
             break;
 
         default:
@@ -49,7 +44,6 @@ static void parse_cmdline(int argc, char **argv)
         }
     }
 }
-
 
 static void rand_str(char *dest, size_t length) {
     char charset[] = "abcdefghijklmnopqrstuvwxyz"
@@ -84,12 +78,14 @@ static void *client(void *arg)
     int start = t_id*(num_keys/num_threads);
     int end = (t_id+1)*(num_keys/num_threads);
     
+    printf("Thread %lu range(%d,%d) \n", t_id, start, end);
     char value[VALUE_LENGTH+1];
+    char key[128];
     rand_str(value, VALUE_LENGTH);
     for (int i = start; i < end; i++) {
-        rand_str(keys[i], KEY_LENGTH);
-        rc = memcached_set(memc, keys[i], KEY_LENGTH, value, 
-                           strlen(value), (time_t)0, (uint32_t)0);
+        sprintf(key, "%d", i);
+        rc = memcached_set(memc, key, strlen(key), value, 
+                           strlen(value), (time_t)(60*60*24*30), (uint32_t)0);
         if (rc != MEMCACHED_SUCCESS) {
             fprintf(stderr, "Couldn't add key\n");
         }
