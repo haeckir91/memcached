@@ -161,12 +161,13 @@ static struct event_base *main_base;
 
 struct time_bench {
     uint64_t start;
+    uint64_t rx;
     uint64_t end;
 };
 
 static bool run_bench = false;
 static int num_requests = 0;
-static char* if_name = "enp69s0";
+static char if_name[16];
 static bool hw_ts = true;
 static bool rx_only = true;
 static struct time_bench ts_pairs[20002];
@@ -188,14 +189,21 @@ static int num_done = -1;
 #define SIOCSHWTSTAMP 0x89b0
 #endif
 
-static uint64_t recv_done(conn* c);
-static uint64_t recv_done(conn* c)
+static uint64_t req_done(conn* c);
+static uint64_t req_done(conn* c)
 {
     struct timespec res;
     clock_gettime(CLOCK_REALTIME, &res);
     return res.tv_sec*NSEC_PER_SEC + res.tv_nsec;
 }
 
+static uint64_t rx_done(conn* c);
+static uint64_t rx_done(conn* c)
+{
+    struct timespec res;
+    clock_gettime(CLOCK_REALTIME, &res);
+    return res.tv_sec*NSEC_PER_SEC + res.tv_nsec;
+}
 
 /* Given a packet, extract the timestamp(s) */
 static uint64_t get_socket_ts(struct msghdr* msg)
@@ -328,6 +336,7 @@ ssize_t tcp_read_msg(conn *c, void* buf, size_t count)
     c->hdr.msg_controllen = 256;
 
     ssize_t n = recvmsg(c->sfd, &c->hdr, 0);
+    uint64_t rx_done = c->read_ts_rx(c);
 
     if (run_bench) {
         if (num_done >= 0 && num_done < 20001) {
@@ -338,6 +347,7 @@ ssize_t tcp_read_msg(conn *c, void* buf, size_t count)
                 c->last_ts = ts;
                 ts_pairs[num_done].start = ts;
             }
+            ts_pairs[num_done].rx = rx_done;
         } else {
             fprintf(stderr, "Too many requests for benchmark \n");
         }
@@ -893,7 +903,8 @@ conn *conn_new(const int sfd, enum conn_states init_state,
         c->read = tcp_read_msg;
         c->sendmsg = tcp_sendmsg;
         c->write = tcp_write;
-        c->read_ts = recv_done;
+        c->read_ts_rx = rx_done;
+        c->read_ts_req = req_done;
     }
 
     if (IS_UDP(transport)) {
@@ -5428,16 +5439,33 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
 
     if (strncmp(key, "end_benchmark", strlen("end_benchmark")) == 0) {
         FILE* output;
-        output = fopen("memcached-kernel-tcp.csv", "w+");
+        output = fopen("memcached-kernel-tcp00.csv", "w+");
         assert(output);
         fprintf(output, "id,rx_app,rx_nic,tx_app,tx_nic,rx_ht,completed \n");
         printf("Num Requests %d \n", num_requests);
         for (int i = 0; i < num_requests; i++) {
-            //uint64_t latency = ts_pairs[i].end - ts_pairs[i].start;
-            //fprintf(stderr, "ID %d Start %lu End %lu Latency %lu \n",
-            //       i, ts_pairs[i].start, ts_pairs[i].end, latency);
             fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].end,
                     ts_pairs[i].start);
+        }
+        fflush(output);
+        fclose(output);
+
+        output = fopen("memcached-kernel-tcp01.csv", "w+");
+        assert(output);
+        fprintf(output, "id,rx_app,rx_nic,tx_app,tx_nic,rx_ht,completed \n");
+        for (int i = 0; i < num_requests; i++) {
+            fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].rx,
+                    ts_pairs[i].start);
+        }
+        fflush(output);
+        fclose(output);
+
+        output = fopen("memcached-kernel-tcp02.csv", "w+");
+        assert(output);
+        fprintf(output, "id,rx_app,rx_nic,tx_app,tx_nic,rx_ht,completed \n");
+        for (int i = 0; i < num_requests; i++) {
+            fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].end,
+                    ts_pairs[i].rx);
         }
         fflush(output);
         fclose(output);
@@ -7271,7 +7299,7 @@ static void drive_machine(conn *c) {
 
                 if (num_done >= 0) {
                     num_requests++;
-                    ts_pairs[num_done].end = c->read_ts(c);
+                    ts_pairs[num_done].end = c->read_ts_req(c);
                 }
 
                 if (run_bench) {
@@ -8864,8 +8892,7 @@ int main (int argc, char **argv) {
             usage_license();
             exit(EXIT_SUCCESS);
         case 'N':
-            if_name = malloc(strlen(optarg));
-            strncpy(if_name, optarg, strlen(optarg));
+            strncpy(if_name, optarg, 15);
             break;
         case 'V':
             printf(PACKAGE " " VERSION "\n");
