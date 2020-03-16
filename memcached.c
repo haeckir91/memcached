@@ -160,18 +160,19 @@ static int max_fds;
 static struct event_base *main_base;
 
 struct time_bench {
-    uint64_t start;
-    uint64_t rx;
-    uint64_t end;
+    uint64_t rx_start;
+    uint64_t rx_end;
+    uint64_t tx_start;
+    uint64_t tx_end;
 };
 
 static bool run_bench = false;
-static int num_requests = 0;
 static char if_name[16];
-static bool hw_ts = true;
-static bool rx_only = true;
+static bool hw_ts = false;
+static bool rx_only = false;
 static struct time_bench ts_pairs[20002];
 static int num_done = -1;
+static bool first = true;
 #ifdef __linux
 
 #include <arpa/inet.h>
@@ -189,8 +190,8 @@ static int num_done = -1;
 #define SIOCSHWTSTAMP 0x89b0
 #endif
 
-static uint64_t req_done(conn* c);
-static uint64_t req_done(conn* c)
+static uint64_t tx_start(conn* c);
+static uint64_t tx_start(conn* c)
 {
     struct timespec res;
     clock_gettime(CLOCK_REALTIME, &res);
@@ -336,18 +337,18 @@ ssize_t tcp_read_msg(conn *c, void* buf, size_t count)
     c->hdr.msg_controllen = 256;
 
     ssize_t n = recvmsg(c->sfd, &c->hdr, 0);
-    uint64_t rx_done = c->read_ts_rx(c);
 
     if (run_bench) {
+        uint64_t rx_done = c->read_ts_rx(c);
         if (num_done >= 0 && num_done < 20001) {
             uint64_t ts = get_socket_ts(&c->hdr);
             if (ts == 0) {
-                ts_pairs[num_done].start = c->last_ts;
+                ts_pairs[num_done].rx_start = c->last_rx_ts;
             } else {
-                c->last_ts = ts;
-                ts_pairs[num_done].start = ts;
+                c->last_rx_ts = ts;
+                ts_pairs[num_done].rx_start = ts;
             }
-            ts_pairs[num_done].rx = rx_done;
+            ts_pairs[num_done].rx_end = rx_done;
         } else {
             fprintf(stderr, "Too many requests for benchmark \n");
         }
@@ -358,7 +359,38 @@ ssize_t tcp_read_msg(conn *c, void* buf, size_t count)
 
 ssize_t tcp_sendmsg(conn *c, struct msghdr *msg, int flags) {
     assert (c != NULL);
-    return sendmsg(c->sfd, msg, flags);
+    c->hdr.msg_control = c->ctrl;
+    c->hdr.msg_controllen = 256;
+    uint64_t tx_start = 0;
+    if (run_bench) {
+        tx_start = c->read_ts_tx(c);
+    }
+
+    ssize_t out = sendmsg(c->sfd, msg, flags);
+    if (run_bench) {
+        if (!first) {
+            if (num_done >= 0 && num_done < 20001) {
+                uint64_t ts = get_socket_ts(&c->hdr);
+                if (ts == 0) {
+                    ts_pairs[num_done].tx_end = c->last_tx_ts;
+                } else {
+                    c->last_tx_ts = ts;
+                    ts_pairs[num_done].tx_end = ts;
+                }
+                ts_pairs[num_done].tx_start = tx_start;
+            } else {
+                fprintf(stderr, "Sending Too many requests for benchmark %d \n", num_done);
+            }
+        } else {
+            first = false;
+        }
+    }
+
+    if (run_bench) {
+        num_done++;
+    }
+
+    return out;
 }
 
 ssize_t tcp_write(conn *c, void *buf, size_t count) {
@@ -904,7 +936,7 @@ conn *conn_new(const int sfd, enum conn_states init_state,
         c->sendmsg = tcp_sendmsg;
         c->write = tcp_write;
         c->read_ts_rx = rx_done;
-        c->read_ts_req = req_done;
+        c->read_ts_tx = tx_start;
     }
 
     if (IS_UDP(transport)) {
@@ -5418,7 +5450,6 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
     if (strncmp(key, "start_benchmark", strlen("start_benchmark")) == 0) {
         printf("Benchmark start! \n");
         run_bench = true;
-        num_requests = 0;
     }
 
 
@@ -5439,33 +5470,47 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
 
     if (strncmp(key, "end_benchmark", strlen("end_benchmark")) == 0) {
         FILE* output;
+        // total
         output = fopen("memcached-kernel-tcp00.csv", "w+");
         assert(output);
         fprintf(output, "id,rx_app,rx_nic,tx_app,tx_nic,rx_ht,completed \n");
-        printf("Num Requests %d \n", num_requests);
-        for (int i = 0; i < num_requests; i++) {
-            fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].end,
-                    ts_pairs[i].start);
+        printf("Num Requests %d \n", num_done);
+        for (int i = 0; i < num_done; i++) {
+            fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].tx_end,
+                    ts_pairs[i].rx_start);
         }
         fflush(output);
         fclose(output);
 
+        // recv
         output = fopen("memcached-kernel-tcp01.csv", "w+");
         assert(output);
         fprintf(output, "id,rx_app,rx_nic,tx_app,tx_nic,rx_ht,completed \n");
-        for (int i = 0; i < num_requests; i++) {
-            fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].rx,
-                    ts_pairs[i].start);
+        for (int i = 0; i < num_done; i++) {
+            fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].rx_end,
+                    ts_pairs[i].rx_start);
         }
         fflush(output);
         fclose(output);
 
+        // process
         output = fopen("memcached-kernel-tcp02.csv", "w+");
         assert(output);
         fprintf(output, "id,rx_app,rx_nic,tx_app,tx_nic,rx_ht,completed \n");
-        for (int i = 0; i < num_requests; i++) {
-            fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].end,
-                    ts_pairs[i].rx);
+        for (int i = 0; i < num_done; i++) {
+            fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].tx_start,
+                    ts_pairs[i].rx_end);
+        }
+        fflush(output);
+        fclose(output);
+
+        // end
+        output = fopen("memcached-kernel-tcp03.csv", "w+");
+        assert(output);
+        fprintf(output, "id,rx_app,rx_nic,tx_app,tx_nic,rx_ht,completed \n");
+        for (int i = 0; i < num_done; i++) {
+            fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].tx_end,
+                    ts_pairs[i].tx_start);
         }
         fflush(output);
         fclose(output);
@@ -7295,15 +7340,6 @@ static void drive_machine(conn *c) {
                     if (settings.verbose > 0)
                         fprintf(stderr, "Unexpected state %d\n", c->state);
                     conn_set_state(c, conn_closing);
-                }
-
-                if (num_done >= 0) {
-                    num_requests++;
-                    ts_pairs[num_done].end = c->read_ts_req(c);
-                }
-
-                if (run_bench) {
-                    num_done++;
                 }
 
                 break;

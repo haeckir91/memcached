@@ -718,7 +718,8 @@ struct conn {
     /*Recvmsg stuff */
     struct msghdr hdr;
     char ctrl[256];
-    uint64_t last_ts;
+    uint64_t last_rx_ts;
+    uint64_t last_tx_ts;
     /* Binary protocol stuff */
     /* This is where the binary header goes */
     protocol_binary_request_header binary_header;
@@ -733,7 +734,7 @@ struct conn {
     ssize_t (*sendmsg)(conn *c, struct msghdr *msg, int flags);
     ssize_t (*write)(conn *c, void *buf, size_t count);
     uint64_t (*read_ts_rx)(conn *c);
-    uint64_t (*read_ts_req)(conn *c);
+    uint64_t (*read_ts_tx)(conn *c);
 };
 
 /* array of conn structures, indexed by file descriptor */
