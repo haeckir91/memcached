@@ -5476,7 +5476,7 @@ static void process_update_command(conn *c, token_t *tokens, const size_t ntoken
         fprintf(output, "id,rx_app,rx_nic,tx_app,tx_nic,rx_ht,completed \n");
         printf("Num Requests %d \n", num_done);
         for (int i = 0; i < num_done; i++) {
-            fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].tx_end,
+            fprintf(output, "%d,%lu,%lu,0,0,0,true\n", i+1, ts_pairs[i].tx_start,
                     ts_pairs[i].rx_start);
         }
         fflush(output);
