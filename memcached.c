@@ -359,17 +359,24 @@ ssize_t tcp_read_msg(conn *c, void* buf, size_t count)
 
 ssize_t tcp_sendmsg(conn *c, struct msghdr *msg, int flags) {
     assert (c != NULL);
-    c->hdr.msg_control = c->ctrl;
-    c->hdr.msg_controllen = 256;
     uint64_t tx_start = 0;
     if (run_bench) {
         tx_start = c->read_ts_tx(c);
     }
 
     ssize_t out = sendmsg(c->sfd, msg, flags);
+    ssize_t got;
     if (run_bench) {
         if (!first) {
             if (num_done >= 0 && num_done < 20001) {
+                c->hdr.msg_control = c->ctrl;
+                c->hdr.msg_controllen = 256;
+                int num_tries  = 0;
+                do {
+                    got = recvmsg(c->sfd, &c->hdr, MSG_ERRQUEUE);   
+                    num_tries++;
+                } while (got < 0 && errno == EAGAIN);
+
                 uint64_t ts = get_socket_ts(&c->hdr);
                 if (ts == 0) {
                     ts_pairs[num_done].tx_end = c->last_tx_ts;
@@ -379,8 +386,9 @@ ssize_t tcp_sendmsg(conn *c, struct msghdr *msg, int flags) {
                 }
                 ts_pairs[num_done].tx_start = tx_start;
             } else {
-                fprintf(stderr, "Sending Too many requests for benchmark %d \n", num_done);
+                fprintf(stderr, "Too many requests for benchmark \n");
             }
+
         } else {
             first = false;
         }
