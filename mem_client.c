@@ -118,7 +118,6 @@ static void *client(void *arg)
         req++;
     }
 
-    sleep(2);
     pthread_barrier_wait(&barrier);
 
     printf("Thread %lu finished benchmark after sending %d requests\n", 
