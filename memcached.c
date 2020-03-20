@@ -360,7 +360,7 @@ ssize_t tcp_read_msg(conn *c, void* buf, size_t count)
 ssize_t tcp_sendmsg(conn *c, struct msghdr *msg, int flags) {
     assert (c != NULL);
     uint64_t tx_start = 0;
-    if (run_bench) {
+    if (run_bench && !first) {
         tx_start = c->read_ts_tx(c);
     }
 
