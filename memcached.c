@@ -8835,6 +8835,7 @@ int main (int argc, char **argv) {
           "d"   /* daemon mode */
           "l:"  /* interface to listen on */
           "N:"  /* interface name to listen on */
+          "H"  /* Enable hardware timestamps */
           "u:"  /* user identity to run as */
           "P:"  /* save PID in file */
           "f:"  /* factor? */
@@ -8953,6 +8954,10 @@ int main (int argc, char **argv) {
             exit(EXIT_SUCCESS);
         case 'N':
             strncpy(if_name, optarg, 15);
+            break;
+        case 'H':
+            hw_ts = true;
+            printf("Enabled HW timestamps \n");
             break;
         case 'V':
             printf(PACKAGE " " VERSION "\n");
