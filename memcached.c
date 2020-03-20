@@ -338,9 +338,9 @@ ssize_t tcp_read_msg(conn *c, void* buf, size_t count)
 
     ssize_t n = recvmsg(c->sfd, &c->hdr, 0);
 
-    if (run_bench) {
+    if (run_bench && (n != -1)) {
+        uint64_t rx_done = c->read_ts_rx(c);
         if (num_done >= 0 && num_done < 20001) {
-            uint64_t rx_done = c->read_ts_rx(c);
             uint64_t ts = get_socket_ts(&c->hdr);
             if (ts == 0) {
                 ts_pairs[num_done].rx_start = c->last_rx_ts;
@@ -357,6 +357,8 @@ ssize_t tcp_read_msg(conn *c, void* buf, size_t count)
     return n;
 }
 
+static char buf[256];
+static struct msghdr hdr;
 ssize_t tcp_sendmsg(conn *c, struct msghdr *msg, int flags) {
     assert (c != NULL);
     uint64_t tx_start = 0;
@@ -369,11 +371,11 @@ ssize_t tcp_sendmsg(conn *c, struct msghdr *msg, int flags) {
     if (run_bench) {
         if (!first) {
             if (num_done >= 0 && num_done < 20001) {
-                c->hdr.msg_control = c->ctrl;
-                c->hdr.msg_controllen = 256;
+                hdr.msg_control = buf;
+                hdr.msg_controllen = 256;
                 int num_tries  = 0;
                 do {
-                    got = recvmsg(c->sfd, &c->hdr, MSG_ERRQUEUE);   
+                    got = recvmsg(c->sfd, &hdr, MSG_ERRQUEUE);   
                     num_tries++;
                 } while (got < 0 && errno == EAGAIN);
 
