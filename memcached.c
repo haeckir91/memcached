@@ -168,7 +168,7 @@ struct time_bench {
 
 static bool run_bench = false;
 static char if_name[16];
-static bool hw_ts = false;
+static bool hw_ts = true;
 static bool rx_only = false;
 static struct time_bench ts_pairs[20002];
 static int num_done = -1;
