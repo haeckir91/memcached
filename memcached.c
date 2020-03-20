@@ -168,11 +168,12 @@ struct time_bench {
 
 static bool run_bench = false;
 static char if_name[16];
-static bool hw_ts = true;
+static bool hw_ts = false;
 static bool rx_only = false;
 static struct time_bench ts_pairs[20002];
 static int num_done = -1;
 static bool first = true;
+static uint64_t offset = 0;
 #ifdef __linux
 
 #include <arpa/inet.h>
@@ -371,15 +372,19 @@ ssize_t tcp_sendmsg(conn *c, struct msghdr *msg, int flags) {
     if (run_bench) {
         if (!first) {
             if (num_done >= 0 && num_done < 20001) {
-                hdr.msg_control = buf;
-                hdr.msg_controllen = 256;
-                int num_tries  = 0;
-                do {
-                    got = recvmsg(c->sfd, &hdr, MSG_ERRQUEUE);   
-                    num_tries++;
-                } while (got < 0 && errno == EAGAIN);
+                uint64_t ts = 0;
+                // need offset because HW/Linux ts have an offset
+                while  (ts < (tx_start+offset)) {
+                    hdr.msg_control = buf;
+                    hdr.msg_controllen = 256;
+                    int num_tries  = 0;
+                    do {
+                        got = recvmsg(c->sfd, &hdr, MSG_ERRQUEUE);   
+                        num_tries++;
+                    } while (got < 0 && errno == EAGAIN);
+                    ts = get_socket_ts(&hdr);
+                }
 
-                uint64_t ts = get_socket_ts(&hdr);
                 if (ts == 0) {
                     ts_pairs[num_done].tx_end = c->last_tx_ts;
                 } else {
@@ -387,6 +392,11 @@ ssize_t tcp_sendmsg(conn *c, struct msghdr *msg, int flags) {
                     ts_pairs[num_done].tx_end = ts;
                 }
                 ts_pairs[num_done].tx_start = tx_start;
+                /*
+                printf("rx_start %lu rx_end %lu tx_start %lu tx_end %lu \n", 
+                       ts_pairs[num_done].rx_start,  ts_pairs[num_done].rx_end,     
+                       tx_start, ts);
+                */
             } else {
                 fprintf(stderr, "Too many requests for benchmark \n");
             }
@@ -7077,6 +7087,10 @@ static void drive_machine(conn *c) {
                     fprintf(stderr, "failed to enable hardware timestamps\n");
                 } else {
                     printf("Enabled HW timestamps for socket fd %d (%s)\n", sfd, if_name);
+                }
+
+                if (hw_ts) {
+                    offset = 37000000000L;
                 }
 
                 dispatch_conn_new(sfd, conn_new_cmd, EV_READ | EV_PERSIST,
