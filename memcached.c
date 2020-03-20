@@ -379,7 +379,7 @@ ssize_t tcp_sendmsg(conn *c, struct msghdr *msg, int flags) {
                     num_tries++;
                 } while (got < 0 && errno == EAGAIN);
 
-                uint64_t ts = get_socket_ts(&c->hdr);
+                uint64_t ts = get_socket_ts(&hdr);
                 if (ts == 0) {
                     ts_pairs[num_done].tx_end = c->last_tx_ts;
                 } else {
