@@ -166,11 +166,13 @@ struct time_bench {
     uint64_t tx_end;
 };
 
+#define MAX_TS 120002
+
 static bool run_bench = false;
 static char if_name[16];
 static bool hw_ts = false;
 static bool rx_only = false;
-static struct time_bench ts_pairs[20002];
+static struct time_bench ts_pairs[MAX_TS];
 static int num_done = -1;
 static bool first = true;
 static uint64_t offset = 0;
@@ -190,6 +192,7 @@ static uint64_t offset = 0;
 #ifndef SIOCSHWTSTAMP
 #define SIOCSHWTSTAMP 0x89b0
 #endif
+
 
 static uint64_t tx_start(conn* c);
 static uint64_t tx_start(conn* c)
@@ -341,7 +344,7 @@ ssize_t tcp_read_msg(conn *c, void* buf, size_t count)
 
     if (run_bench && (n != -1)) {
         uint64_t rx_done = c->read_ts_rx(c);
-        if (num_done >= 0 && num_done < 20001) {
+        if (num_done >= 0 && num_done < MAX_TS) {
             uint64_t ts = get_socket_ts(&c->hdr);
             if (ts == 0) {
                 ts_pairs[num_done].rx_start = c->last_rx_ts;
@@ -371,7 +374,7 @@ ssize_t tcp_sendmsg(conn *c, struct msghdr *msg, int flags) {
     ssize_t got;
     if (run_bench) {
         if (!first) {
-            if (num_done >= 0 && num_done < 20001) {
+            if (num_done >= 0 && num_done < MAX_TS) {
                 uint64_t ts = 0;
                 // need offset because HW/Linux ts have an offset
                 while  (ts < (tx_start+offset)) {
