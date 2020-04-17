@@ -2,6 +2,11 @@
 
 mkdir perf-num
 
+TIME_SETUP="systemctl stop systemd-timesyncd.service; systemctl daemon-reload; systemctl stop ptp4l; systemctl stop phc2sys; systemctl start ptp4l; systemctl start phc2sys"
+
+$TIME_SETUP
+
+sleep 10
 
 for i in {1..12}
 do
@@ -14,7 +19,7 @@ do
 	sleep 5
         ssh sc2-hs2-b1541 $CLIENT_CMD
         cp memcached-kernel-tcp01.csv perf-num/cyc-$i/recv$j.csv
-	sleep 2
+	sleep 30
     done
 done
 
@@ -29,5 +34,5 @@ do
 	sleep 5
 	ssh sc2-hs2-b1541 $CLIENT_CMD
 	cp memcached-kernel-tcp01.csv perf-num/none/recv$j.csv
-	sleep 2
+	sleep 30
 done
