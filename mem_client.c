@@ -12,6 +12,14 @@
 #define NUM_KEYS 10
 #define KEY_LENGTH 10
 
+#define NSEC_PER_SEC    1000000000L
+
+
+struct bench_record {
+    uint64_t start;
+    uint64_t end;
+};
+
 static int num_ops = 2000;
 static int num_threads = 1;
 static bool non_block = false;
@@ -22,6 +30,8 @@ static int count = 0;
 
 static pthread_t* threads; // all threads
 static pthread_barrier_t barrier;
+
+static struct bench_record* bench;
 
 static void parse_cmdline(int argc, char **argv)
 {
@@ -108,14 +118,20 @@ static void *client(void *arg)
     int req = 0;
     size_t value_length;
     uint32_t flags;
+    struct timespec start;
+    struct timespec end;
     while (count < num_ops) {
         int old =__atomic_fetch_add(&count, 1, __ATOMIC_SEQ_CST);
         sprintf(key, "%d", rand() % key_range);
+        clock_gettime(CLOCK_REALTIME, &start);
         value = memcached_get(memc, key, strlen(key), &value_length, &flags, &rc);
+        clock_gettime(CLOCK_REALTIME, &end);
         if (rc != MEMCACHED_SUCCESS) {
             fprintf(stderr, "Couldn't get key: %s\n", memcached_strerror(memc, rc));
         }
         req++;
+        bench[old].start = start.tv_sec*NSEC_PER_SEC + start.tv_nsec;
+        bench[old].end = end.tv_sec*NSEC_PER_SEC + end.tv_nsec;
     }
 
     pthread_barrier_wait(&barrier);
@@ -150,6 +166,8 @@ int main(int argc, char **argv) {
 
     FILE *fp = fopen("memcached-client-kernel-tcp.csv", "ab+");
 
+    bench = calloc(num_ops, sizeof(struct bench_record));
+
     uint32_t num_cores = sysconf(_SC_NPROCESSORS_ONLN);
     for (uint64_t i = 0; i < (uint32_t) num_threads; i++) { 
 
@@ -169,6 +187,18 @@ int main(int argc, char **argv) {
         pthread_join(threads[i], NULL);
     }
     
+    FILE* output;
+
+    output = fopen("memcached-kernel-tcp-client00.csv", "w+");
+    assert(output);
+    fprintf(output, "id,start,end,latency\n");
+    for (int i = 0; i < num_ops; i++) {
+        fprintf(output, "%d,%lu,%lu,%lu\n", i+1, bench[i].start,
+                bench[i].end, bench[i].end - bench[i].start);
+    }
+    fflush(output);
+    fclose(output);
+
     printf("Ending Benchmark \n");
     return 0;
 }
