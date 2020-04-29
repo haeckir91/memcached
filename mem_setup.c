@@ -26,8 +26,7 @@ static void parse_cmdline(int argc, char **argv)
         switch (opt) {
         case 's': 
             printf("Using server %s \n", optarg);
-            server = calloc(1, strlen(optarg));
-            strncpy(server, optarg, strlen(optarg));
+            server = strdup(optarg);
             break;
         case 't': 
             printf("Starting %d client threads \n", atoi(optarg));
@@ -83,13 +82,16 @@ static void *client(void *arg)
     char key[128];
     rand_str(value, VALUE_LENGTH);
     for (int i = start; i < end; i++) {
-        sprintf(key, "%d", i);
-        rc = memcached_set(memc, key, strlen(key), value, 
-                           strlen(value), (time_t) 0, (uint32_t)0);
+        int ret = sprintf(key, "%d", i);
+        rc = memcached_set(memc, key, ret, value,
+                           VALUE_LENGTH, (time_t) 0, (uint32_t)0);
         if (rc != MEMCACHED_SUCCESS) {
             fprintf(stderr, "Couldn't add key %s \n", memcached_last_error_message(memc));
         }
     }
+    memcached_free(memc);
+    memcached_server_list_free(servers);
+    return NULL;
 }
 
 int main(int argc, char **argv) {
@@ -120,12 +122,14 @@ int main(int argc, char **argv) {
         pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpuset);
 	
         int ret = pthread_create(&threads[i], &attr, client, (void*) i);
+        pthread_attr_destroy(&attr);
         assert(ret == 0);
     }
     
     for (int i = 0; i < num_threads; i++) {
         pthread_join(threads[i], NULL);
     }
+    free(threads);
     
     printf("Ending Setup \n");
     return 0;
