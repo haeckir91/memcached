@@ -29,7 +29,9 @@ static int count = 0;
 
 
 static pthread_t* threads; // all threads
-static pthread_barrier_t barrier;
+static pthread_barrier_t barrier1;
+static pthread_barrier_t barrier2;
+static pthread_barrier_t barrier3;
 
 static struct bench_record* bench;
 
@@ -40,8 +42,7 @@ static void parse_cmdline(int argc, char **argv)
         switch (opt) {
         case 's': 
             printf("Using server %s \n", optarg);
-            server = calloc(1, strlen(optarg));
-            strncpy(server, optarg, strlen(optarg));
+            server = strdup(optarg);
             break;
         case 'r': 
             printf("Sending %d set requests \n", atoi(optarg));
@@ -95,7 +96,7 @@ static void *client(void *arg)
         }
     }
 
-    pthread_barrier_wait(&barrier);
+    pthread_barrier_wait(&barrier1);
 
     if (t_id == 0) {
         char len_str[32];
@@ -111,7 +112,7 @@ static void *client(void *arg)
     }
 
     printf("Thread %lu waiting to start benchmark \n", t_id);
-    pthread_barrier_wait(&barrier);
+    pthread_barrier_wait(&barrier2);
     
     char* value;
     char key[128];
@@ -122,19 +123,20 @@ static void *client(void *arg)
     struct timespec end;
     while (count < num_ops) {
         int old =__atomic_fetch_add(&count, 1, __ATOMIC_SEQ_CST);
-        sprintf(key, "%d", rand() % key_range);
+        int ret = sprintf(key, "%d", rand() % key_range);
         clock_gettime(CLOCK_REALTIME, &start);
-        value = memcached_get(memc, key, strlen(key), &value_length, &flags, &rc);
+        value = memcached_get(memc, key, ret, &value_length, &flags, &rc);
         clock_gettime(CLOCK_REALTIME, &end);
         if (rc != MEMCACHED_SUCCESS) {
             fprintf(stderr, "Couldn't get key: %s\n", memcached_strerror(memc, rc));
         }
+        free(value);
         req++;
         bench[old].start = start.tv_sec*NSEC_PER_SEC + start.tv_nsec;
         bench[old].end = end.tv_sec*NSEC_PER_SEC + end.tv_nsec;
     }
 
-    pthread_barrier_wait(&barrier);
+    pthread_barrier_wait(&barrier3);
 
     printf("Thread %lu finished benchmark after sending %d requests\n", 
            t_id, req);
@@ -143,6 +145,9 @@ static void *client(void *arg)
         rc = memcached_set(memc, "end_benchmark", strlen("end_benchmark"), "1000", 
                            strlen("1000"), (time_t)0, (uint32_t)0);
     }
+    memcached_free(memc);
+    memcached_server_list_free(servers);
+    return NULL;
 
 }
 
@@ -158,7 +163,9 @@ int main(int argc, char **argv) {
         exit(1);
     }
     
-    pthread_barrier_init(&barrier, NULL, num_threads);
+    pthread_barrier_init(&barrier1, NULL, num_threads);
+    pthread_barrier_init(&barrier2, NULL, num_threads);
+    pthread_barrier_init(&barrier3, NULL, num_threads);
 
     char *retrieved_value;
     size_t value_length;
@@ -181,11 +188,13 @@ int main(int argc, char **argv) {
 	
         int ret = pthread_create(&threads[i], &attr, client, (void*) i);
         assert(ret == 0);
+        pthread_attr_destroy(&attr);
     }
     
     for (int i = 0; i < num_threads; i++) {
         pthread_join(threads[i], NULL);
     }
+    free(threads);
     
     FILE* output;
 
