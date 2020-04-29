@@ -262,7 +262,7 @@ static int enable_hwtstamp(int sock, char *interface, bool hw, bool rxonly)
 
     hwconfig_requested = hwconfig;
 
-    int so_timestamping_flags = 0;
+    int so_timestamping_flags = SOF_TIMESTAMPING_OPT_TSONLY;
     if (hw)
     {
         if (ioctl(sock, SIOCSHWTSTAMP, &hwtstamp) < 0)
@@ -361,8 +361,6 @@ ssize_t tcp_read_msg(conn *c, void* buf, size_t count)
     return n;
 }
 
-static char buf[256];
-static struct msghdr hdr;
 ssize_t tcp_sendmsg(conn *c, struct msghdr *msg, int flags) {
     assert (c != NULL);
     uint64_t tx_start = 0;
@@ -371,22 +369,21 @@ ssize_t tcp_sendmsg(conn *c, struct msghdr *msg, int flags) {
     }
 
     ssize_t out = sendmsg(c->sfd, msg, flags);
+    char buf[256];
+    struct msghdr hdr = {NULL};
+    hdr.msg_control = buf;
+    hdr.msg_controllen = sizeof(buf);
     ssize_t got;
+    do {
+        got = recvmsg(c->sfd, &hdr, MSG_ERRQUEUE);
+    } while (got < 0 && errno == EAGAIN);
+    assert(got >= 0 && hdr.msg_controllen > 0);
+    uint64_t ts = get_socket_ts(&hdr);
+
     if (run_bench) {
         if (!first) {
             if (num_done >= 0 && num_done < MAX_TS) {
-                uint64_t ts = 0;
                 // need offset because HW/Linux ts have an offset
-                while  (ts < (tx_start+offset)) {
-                    hdr.msg_control = buf;
-                    hdr.msg_controllen = 256;
-                    int num_tries  = 0;
-                    do {
-                        got = recvmsg(c->sfd, &hdr, MSG_ERRQUEUE);   
-                        num_tries++;
-                    } while (got < 0 && errno == EAGAIN);
-                    ts = get_socket_ts(&hdr);
-                }
 
                 if (ts == 0) {
                     ts_pairs[num_done].tx_end = c->last_tx_ts;
